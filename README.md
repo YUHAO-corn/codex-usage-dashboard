@@ -1,8 +1,10 @@
 # Codex Usage Dashboard
 
-一个本地 Codex 用量仪表盘。运行 `codex-usage`，它会生成并打开中文 HTML 报告，统计 input / output / cached input token、模型分布、每日趋势和估算费用。
+**English** | [中文](#中文)
 
-它默认优先读取 Codex 自己的 session 日志，并复用 [`@ccusage/codex`](https://www.npmjs.com/package/@ccusage/codex) 做 token 统计；需要代理链路或供应商切换口径时，也可以切到 CC Switch 的本地请求日志。
+A local token and estimated cost dashboard for Codex. Run `codex-usage` and it opens a local HTML report with input tokens, output tokens, cached input tokens, model breakdowns, daily trends, and estimated cost.
+
+By default it reads Codex's own local session logs through [`@ccusage/codex`](https://www.npmjs.com/package/@ccusage/codex). If you use CC Switch and want the proxy/provider-chain view, it can also read the local CC Switch SQLite database.
 
 ![status](https://img.shields.io/badge/status-local%20first-1c7c54)
 ![python](https://img.shields.io/badge/python-3.10%2B-2457a6)
@@ -10,16 +12,246 @@
 
 ![Codex Usage Dashboard screenshot](docs/assets/dashboard-preview.png)
 
-> 截图使用演示数据生成，不包含真实本地用量。
+> The screenshot uses demo data only. It does not include real local usage.
+
+## Who It Is For
+
+- You use Codex CLI or Codex Desktop.
+- You want to see weekly, monthly, or custom-range Codex token usage.
+- You may use CC Switch across multiple providers, or you may not use CC Switch at all.
+- You want to give a GitHub link to an AI coding agent and have it install, configure, and explain the report for you.
+
+## Two Ways To Use It
+
+This project supports both a CLI and a Skill. They use the same implementation; only the entry point is different.
+
+If you are comfortable with commands, install it and run `codex-usage`.
+
+If you prefer using an AI agent, install the included Skill. Then ask your agent to use `$codex-usage-dashboard`; it will check your environment, run the report, and explain the data source.
+
+## CLI Usage
+
+Recommended install:
+
+```bash
+pipx install git+https://github.com/YUHAO-corn/codex-usage-dashboard.git
+codex-usage
+```
+
+You can also clone and run it directly:
+
+```bash
+git clone https://github.com/YUHAO-corn/codex-usage-dashboard.git
+cd codex-usage-dashboard
+python3 bin/codex-usage
+```
+
+By default it writes and opens:
+
+```text
+~/codex-usage-dashboard.html
+```
+
+## Skill Usage
+
+This repository ships a Codex-compatible Skill at `skills/codex-usage-dashboard`.
+
+The Skill does not replace the CLI or duplicate the parser. It tells an AI agent how to inspect your environment, install dependencies, choose the right data source, run `codex-usage`, and explain the report.
+
+If your AI client can install Skills from GitHub, give it this path:
+
+```text
+https://github.com/YUHAO-corn/codex-usage-dashboard/tree/main/skills/codex-usage-dashboard
+```
+
+You can say:
+
+```text
+Please install this Codex Usage Dashboard Skill:
+https://github.com/YUHAO-corn/codex-usage-dashboard/tree/main/skills/codex-usage-dashboard
+```
+
+Restart Codex or your AI client after installation if Skills are loaded at startup.
+
+After installation, use:
+
+```text
+Use $codex-usage-dashboard to open my Codex usage report and explain the data source.
+```
+
+## Data Sources
+
+Default mode is `--source auto`:
+
+- If `~/.codex/sessions/**/rollout-*.jsonl` exists, it prefers Codex's local session logs. This is the better view for total Codex token usage and is not mock data.
+- If Codex session parsing is unavailable but `~/.cc-switch/cc-switch.db` exists, it falls back to CC Switch local SQLite.
+- If you specifically want the proxy/provider-chain view, run `codex-usage --source cc-switch`.
+
+Codex session parsing needs `ccusage-codex`. Install it once:
+
+```bash
+npm install -g @ccusage/codex
+codex-usage
+```
+
+If it is not installed globally, the tool will try to run `@ccusage/codex` through `npx`. The first run may need Node.js and network access.
+
+## For AI Coding Agents
+
+If you are Codex, Claude Code, or another local AI coding agent and a user gives you this repository, first explain that there are two entry points:
+
+```text
+You can use the CLI directly: run codex-usage to open the report.
+You can also install the Skill: then ask me to use $codex-usage-dashboard and I will open the report and explain it.
+```
+
+If the user chooses CLI:
+
+1. Check Python: `python3 --version`, requiring Python 3.10+.
+2. Check Codex sessions: `~/.codex/sessions`.
+3. If Codex sessions exist, check Node.js/npm and install the parser with `npm install -g @ccusage/codex`.
+4. Check CC Switch fallback data: `~/.cc-switch/cc-switch.db`.
+5. Install this project: `pipx install git+https://github.com/YUHAO-corn/codex-usage-dashboard.git`.
+6. Run `codex-usage` and confirm the browser opens `~/codex-usage-dashboard.html`.
+7. Tell the user the common commands:
+
+```bash
+codex-usage                    # open this month's dashboard
+codex-usage week               # this week
+codex-usage 30d                # last 30 days
+codex-usage --source cc-switch # force CC Switch source
+codex-usage --summary month    # terminal summary
+codex-usage month --json       # JSON output
+```
+
+If the user chooses Skill:
+
+1. Install the Skill path: `https://github.com/YUHAO-corn/codex-usage-dashboard/tree/main/skills/codex-usage-dashboard`.
+2. Make sure the CLI is available too, because the Skill invokes `codex-usage` instead of copying the parser.
+3. Install or verify `@ccusage/codex` so Codex local sessions can be used first.
+4. Ask the user to restart Codex or the relevant AI client so Skills are reloaded.
+5. Tell the user the future prompt:
+
+```text
+Use $codex-usage-dashboard to open my Codex usage report and explain the data source.
+```
+
+If the user has neither CC Switch data nor `~/.codex/sessions`, there is no real local usage data to report. Do not generate a mock report.
+
+## Periods
+
+Built-in periods:
+
+```bash
+codex-usage today
+codex-usage yesterday
+codex-usage week
+codex-usage last7
+codex-usage last14
+codex-usage month
+codex-usage 30d
+codex-usage last90
+codex-usage quarter
+codex-usage year
+codex-usage all
+```
+
+Custom date ranges:
+
+```bash
+codex-usage --since 2026-05-01 --until 2026-05-13
+codex-usage --since 2026-05-01 --until 2026-05-13 --json
+```
+
+Older dashboard-style commands still work:
+
+```bash
+codex-usage dashboard
+codex-usage dashboard 30d
+codex-usage 30d --dashboard
+```
+
+## Output Modes
+
+HTML dashboard is the default:
+
+```bash
+codex-usage
+codex-usage 30d
+codex-usage --no-open
+```
+
+Terminal summary:
+
+```bash
+codex-usage --summary month
+codex-usage --summary last7 --daily
+```
+
+JSON:
+
+```bash
+codex-usage month --json
+```
+
+Language:
+
+```bash
+codex-usage --lang auto # default, follows browser/system language
+codex-usage --lang en   # English dashboard
+codex-usage --lang zh   # Chinese dashboard
+```
+
+## What The Dashboard Shows
+
+- Total tokens
+- Input tokens
+- Output tokens
+- Cached input tokens
+- Cached input ratio
+- Estimated cost
+- Daily trends
+- Model breakdown
+- Daily and model detail tables
+- Current data source and accounting notes
+
+## Reliability Notes
+
+Cost is an estimate, not a provider invoice.
+
+The Codex session source reads local Codex JSONL logs. It is a good view for total Codex token usage. It does not separate the bill by provider and it does not replace official provider invoices, but it is much more useful than mock data or screenshots.
+
+The CC Switch source reads local proxy request logs. It is useful for requests that passed through CC Switch and provider-switching context. It may not cover every Codex session.
+
+## Privacy
+
+- Reads only local `~/.cc-switch/cc-switch.db` or `~/.codex/sessions`
+- Does not upload usage data
+- Writes a local HTML file
+- The dashboard does not depend on remote JS or CSS
+
+## Development
+
+```bash
+python3 -m py_compile codex_usage_dashboard/cli.py
+python3 bin/codex-usage --no-open
+python3 bin/codex-usage --source codex --summary today
+```
+
+## 中文
+
+一个本地 Codex 用量仪表盘。运行 `codex-usage`，它会生成并打开 HTML 报告，统计 input / output / cached input token、模型分布、每日趋势和估算费用。
+
+它默认优先读取 Codex 自己的 session 日志，并复用 [`@ccusage/codex`](https://www.npmjs.com/package/@ccusage/codex) 做 token 统计；需要代理链路或供应商切换口径时，也可以切到 CC Switch 的本地请求日志。
 
 ## 适合谁
 
 - 你用 Codex CLI / Codex Desktop。
-- 你想看本周、本月、近 30 天的 Codex token 用量。
+- 你想看本周、本月、近 30 天或自定义范围的 Codex token 用量。
 - 你可能用 CC Switch 切多个供应商，也可能完全不用 CC Switch。
 - 你想把一个开源链接丢给 AI agent，让它帮你装好并解释以后怎么用。
 
-## 你有两种用法
+## 两种用法
 
 这个项目同时支持命令行和 Skill。两种方式用的是同一套统计逻辑，区别只是入口不同。
 
@@ -54,7 +286,7 @@ python3 bin/codex-usage
 
 这个仓库也附带一个 Codex-compatible Skill：`skills/codex-usage-dashboard`。
 
-Skill 不替代 CLI，也不复制一套统计逻辑。它的作用是让 AI agent 知道该怎么帮用户检查环境、安装依赖、选择数据源、运行 `codex-usage`，并用中文解释报告。
+Skill 不替代 CLI，也不复制一套统计逻辑。它的作用是让 AI agent 知道该怎么帮用户检查环境、安装依赖、选择数据源、运行 `codex-usage`，并解释报告。
 
 如果你的 AI 支持从 GitHub 安装 Skill，可以把这个路径交给它：
 
@@ -96,9 +328,7 @@ codex-usage
 
 ## 给 AI Agent 的安装提示
 
-如果你是 Codex、Claude Code 或其它本地 AI coding agent，用户给你这个仓库链接后，请按下面步骤处理：
-
-先用人话告诉用户有两种方式：
+如果你是 Codex、Claude Code 或其它本地 AI coding agent，用户给你这个仓库链接后，请先告诉用户有两种方式：
 
 ```text
 你可以直接用命令行：以后运行 codex-usage 就会打开报告。
@@ -116,12 +346,12 @@ codex-usage
 7. 告诉用户以后常用命令：
 
 ```bash
-codex-usage                 # 打开本月仪表盘
-codex-usage week            # 本周仪表盘
-codex-usage 30d             # 近 30 天仪表盘
+codex-usage                    # 打开本月仪表盘
+codex-usage week               # 本周仪表盘
+codex-usage 30d                # 近 30 天仪表盘
 codex-usage --source cc-switch # 强制使用 CC Switch 口径
-codex-usage --summary month # 终端摘要
-codex-usage month --json    # JSON 输出
+codex-usage --summary month    # 终端摘要
+codex-usage month --json       # JSON 输出
 ```
 
 如果用户选择 Skill：
@@ -192,6 +422,14 @@ JSON：
 
 ```bash
 codex-usage month --json
+```
+
+语言：
+
+```bash
+codex-usage --lang auto # 默认，跟随浏览器/系统语言
+codex-usage --lang en   # 英文仪表盘
+codex-usage --lang zh   # 中文仪表盘
 ```
 
 ## 页面里能看到什么

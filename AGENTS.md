@@ -29,6 +29,8 @@ codex-usage --source cc-switch
 codex-usage --since 2026-05-01 --until 2026-05-13 --dashboard
 codex-usage --summary month
 codex-usage month --json
+codex-usage --lang en
+codex-usage --lang zh
 ```
 
 If the user wants the Skill path, do this:
@@ -52,3 +54,4 @@ Important constraints:
 - Codex session data is the preferred total-token view, but it cannot separate provider-specific bills.
 - CC Switch data is useful for proxy request records and provider-switching context, but may not cover every Codex session.
 - If `unknown` model rows exist, they are estimated as `gpt-5.5` by default unless the user passes `--unknown-as none`.
+- Dashboard language defaults to `--lang auto`, following the browser/system language. Use `--lang en` or `--lang zh` to force a language.

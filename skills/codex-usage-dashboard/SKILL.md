@@ -52,6 +52,8 @@ codex-usage 30d
 codex-usage --summary month
 codex-usage --source cc-switch
 codex-usage --since 2026-05-01 --until 2026-05-13
+codex-usage --lang en
+codex-usage --lang zh
 ```
 
 ## Guardrails
@@ -60,3 +62,4 @@ codex-usage --since 2026-05-01 --until 2026-05-13
 - Do not commit or share a user's generated dashboard if it contains real usage data.
 - If creating screenshots for public docs, use demo data only.
 - Ask before running installs that require network access.
+- Dashboard language defaults to the browser/system language. Use `--lang en` or `--lang zh` when the user asks for a specific language.
