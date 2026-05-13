@@ -8,6 +8,10 @@
 ![python](https://img.shields.io/badge/python-3.10%2B-2457a6)
 ![license](https://img.shields.io/badge/license-MIT-c89020)
 
+![Codex Usage Dashboard screenshot](docs/assets/dashboard-preview.png)
+
+> 截图使用演示数据生成，不包含真实本地用量。
+
 ## 适合谁
 
 - 你用 Codex CLI / Codex Desktop。
