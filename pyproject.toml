@@ -1,0 +1,11 @@
+[project]
+name = "codex-usage-dashboard"
+version = "0.1.0"
+description = "Local Codex token and cost dashboard for CC Switch users"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Codex Usage Dashboard Contributors" }]
+
+[project.scripts]
+codex-usage = "codex_usage_dashboard.cli:main"
