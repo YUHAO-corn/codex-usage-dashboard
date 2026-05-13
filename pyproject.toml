@@ -1,7 +1,7 @@
 [project]
 name = "codex-usage-dashboard"
-version = "0.1.0"
-description = "Local Codex token and cost dashboard for CC Switch users"
+version = "0.2.0"
+description = "Local Codex token and cost dashboard with CC Switch and Codex session sources"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }

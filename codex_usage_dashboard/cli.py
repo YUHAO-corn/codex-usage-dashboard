@@ -7,6 +7,8 @@ import html
 import json
 import os
 import re
+import shutil
+import subprocess
 import sqlite3
 import sys
 import webbrowser
@@ -15,7 +17,12 @@ from pathlib import Path
 
 
 DEFAULT_DB = Path.home() / ".cc-switch" / "cc-switch.db"
+DEFAULT_CODEX_HOME = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
 DEFAULT_OUTPUT = Path.home() / "codex-usage-dashboard.html"
+SOURCE_LABELS = {
+    "cc-switch": "CC Switch 本地 SQLite",
+    "codex": "Codex 本地 session 日志",
+}
 
 # USD per 1M tokens. These fill gaps in older CC Switch pricing tables.
 DEFAULT_PRICES = {
@@ -66,6 +73,18 @@ def parse_date(value: str | None, end: bool = False) -> int | None:
     return int(parsed.replace(tzinfo=local_now().tzinfo).timestamp())
 
 
+def parse_timestamp(value: str | None) -> dt.datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=local_now().tzinfo)
+    return parsed.astimezone()
+
+
 def period_bounds(args: argparse.Namespace) -> tuple[int | None, int | None, str, str]:
     if args.since or args.until:
         return parse_date(args.since), parse_date(args.until, end=True), args.since or "beginning", args.until or "now"
@@ -113,8 +132,12 @@ def connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+def default_prices() -> dict[str, dict[str, Decimal]]:
+    return {k: {kk: dec(vv) for kk, vv in v.items()} for k, v in DEFAULT_PRICES.items()}
+
+
 def load_prices(conn: sqlite3.Connection) -> dict[str, dict[str, Decimal]]:
-    prices = {k: {kk: dec(vv) for kk, vv in v.items()} for k, v in DEFAULT_PRICES.items()}
+    prices = default_prices()
     try:
         rows = conn.execute(
             """
@@ -171,6 +194,107 @@ def fetch_rows(conn: sqlite3.Connection, start_ts: int | None, end_ts: int | Non
     ).fetchall()
 
 
+def date_arg_from_ts(timestamp: int | None, inclusive_end: bool = False) -> str | None:
+    if timestamp is None:
+        return None
+    if inclusive_end:
+        timestamp -= 1
+    return dt.datetime.fromtimestamp(timestamp, tz=local_now().tzinfo).strftime("%Y-%m-%d")
+
+
+def ccusage_base_command(args: argparse.Namespace) -> list[str]:
+    if args.ccusage_bin:
+        return [args.ccusage_bin]
+
+    installed = shutil.which("ccusage-codex")
+    if installed:
+        return [installed]
+
+    return ["npx", "--yes", "@ccusage/codex@latest"]
+
+
+def ccusage_command(args: argparse.Namespace, start_ts: int | None, end_ts: int | None) -> list[str]:
+    command = [*ccusage_base_command(args), "session", "--json", "--locale", "en-CA"]
+    since = date_arg_from_ts(start_ts)
+    until = date_arg_from_ts(end_ts, inclusive_end=True)
+    if since:
+        command.extend(["--since", since])
+    if until:
+        command.extend(["--until", until])
+    if args.timezone:
+        command.extend(["--timezone", args.timezone])
+    if args.ccusage_offline:
+        command.append("--offline")
+    return command
+
+
+def fetch_ccusage_rows(args: argparse.Namespace, start_ts: int | None, end_ts: int | None) -> list[dict]:
+    codex_home = Path(args.codex_home).expanduser()
+    sessions_dir = codex_home / "sessions"
+    if not sessions_dir.exists():
+        raise SystemExit(f"Codex session directory not found: {sessions_dir}")
+
+    env = os.environ.copy()
+    env["CODEX_HOME"] = str(codex_home)
+    command = ccusage_command(args, start_ts, end_ts)
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, env=env, check=False)
+    except FileNotFoundError:
+        raise SystemExit("npx not found. Install Node.js first, or use CC Switch as the data source.")
+
+    if result.returncode != 0:
+        stderr = result.stderr.strip() or result.stdout.strip()
+        raise SystemExit(
+            "@ccusage/codex failed. If this machine does not have CC Switch, install the parser with "
+            "`npm install -g @ccusage/codex` and retry. Raw error:\n" + stderr
+        )
+
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"@ccusage/codex returned invalid JSON: {exc}") from exc
+
+    rows: list[dict] = []
+    for session in payload.get("sessions", []):
+        activity = parse_timestamp(session.get("lastActivity"))
+        if not activity:
+            continue
+        day = activity.strftime("%Y-%m-%d")
+        session_cost = dec(session.get("costUSD"))
+        session_tokens = dec(session.get("totalTokens"))
+        models = session.get("models") if isinstance(session.get("models"), dict) else {}
+        if not models:
+            models = {"unknown": session}
+
+        for model, stats in models.items():
+            model_tokens = dec(stats.get("totalTokens"))
+            cost_share = Decimal("1") if session_tokens <= 0 else model_tokens / session_tokens
+            rows.append(
+                {
+                    "day": day,
+                    "model": model or "unknown",
+                    "requests": 1,
+                    "input_tokens": int(stats.get("inputTokens") or 0),
+                    "output_tokens": int(stats.get("outputTokens") or 0),
+                    "reasoning_output_tokens": int(stats.get("reasoningOutputTokens") or 0),
+                    "cache_read_tokens": int(stats.get("cachedInputTokens") or 0),
+                    "cache_creation_tokens": 0,
+                    "logged_cost_usd": 0,
+                    "estimated_cost_usd": session_cost * cost_share,
+                }
+            )
+    return rows
+
+
+def row_value(row: sqlite3.Row | dict, key: str, default=0):
+    if isinstance(row, dict):
+        return row.get(key, default)
+    try:
+        return row[key]
+    except (IndexError, KeyError):
+        return default
+
+
 def estimate_cost(item: dict, prices: dict[str, dict[str, Decimal]], unknown_as: str | None) -> Decimal | None:
     model = normalize_model(item["model"])
     if model == "unknown" and unknown_as and unknown_as != "none":
@@ -192,7 +316,7 @@ def estimate_cost(item: dict, prices: dict[str, dict[str, Decimal]], unknown_as:
     ) / Decimal("1000000")
 
 
-def summarize(rows: list[sqlite3.Row], prices: dict[str, dict[str, Decimal]], unknown_as: str | None) -> dict:
+def summarize(rows: list[sqlite3.Row | dict], prices: dict[str, dict[str, Decimal]], unknown_as: str | None) -> dict:
     daily: dict[str, dict] = {}
     models: dict[str, dict] = {}
     total = empty_bucket()
@@ -200,18 +324,20 @@ def summarize(rows: list[sqlite3.Row], prices: dict[str, dict[str, Decimal]], un
 
     for row in rows:
         item = {
-            "day": row["day"],
-            "model": row["model"] or "unknown",
-            "normalized_model": normalize_model(row["model"]),
-            "requests": int(row["requests"] or 0),
-            "input_tokens": int(row["input_tokens"] or 0),
-            "output_tokens": int(row["output_tokens"] or 0),
-            "cache_read_tokens": int(row["cache_read_tokens"] or 0),
-            "cache_creation_tokens": int(row["cache_creation_tokens"] or 0),
-            "logged_cost_usd": dec(row["logged_cost_usd"]),
+            "day": row_value(row, "day"),
+            "model": row_value(row, "model", "unknown") or "unknown",
+            "normalized_model": normalize_model(row_value(row, "model", "unknown")),
+            "requests": int(row_value(row, "requests") or 0),
+            "input_tokens": int(row_value(row, "input_tokens") or 0),
+            "output_tokens": int(row_value(row, "output_tokens") or 0),
+            "reasoning_output_tokens": int(row_value(row, "reasoning_output_tokens") or 0),
+            "cache_read_tokens": int(row_value(row, "cache_read_tokens") or 0),
+            "cache_creation_tokens": int(row_value(row, "cache_creation_tokens") or 0),
+            "logged_cost_usd": dec(row_value(row, "logged_cost_usd")),
         }
         item["total_tokens"] = item["input_tokens"] + item["output_tokens"]
-        item["estimated_cost_usd"] = estimate_cost(item, prices, unknown_as)
+        provided_cost = row_value(row, "estimated_cost_usd", None)
+        item["estimated_cost_usd"] = dec(provided_cost) if provided_cost is not None else estimate_cost(item, prices, unknown_as)
         item["estimated_as"] = (
             normalize_model(unknown_as)
             if item["normalized_model"] == "unknown" and unknown_as and unknown_as != "none"
@@ -333,6 +459,7 @@ def fmt_money(value: Decimal | float | int | None) -> str:
 def print_summary(data: dict, period: str, start_label: str, end_label: str) -> None:
     total = data["total"]
     print(f"Codex usage: {period} ({start_label} -> {end_label})")
+    print(f"Data source: {data.get('source_label', 'unknown')}")
     print(f"Requests: {fmt_int(total['requests'])}")
     print(f"Tokens: {fmt_int(total['total_tokens'])} total | {fmt_int(total['input_tokens'])} input | {fmt_int(total['output_tokens'])} output")
     print(f"Cached input: {fmt_int(total['cache_read_tokens'])} ({total['cache_ratio'] * 100:.1f}%)")
@@ -369,6 +496,7 @@ def render_dashboard(data: dict, period: str, start_label: str, end_label: str) 
     payload = json.dumps(data, default=json_ready, ensure_ascii=False)
     title = f"Codex 用量 · {html.escape(zh_window(start_label))}"
     window_label = f"{zh_window(start_label)} → {zh_window(end_label)}"
+    source_label = data.get("source_label", "未知")
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -536,7 +664,7 @@ def render_dashboard(data: dict, period: str, start_label: str, end_label: str) 
     <header>
       <div>
         <h1>Codex 用量账本</h1>
-        <p class="subtitle">统计所有经过 Codex 的本地用量，不区分 CC Switch 当时切到哪个供应商。</p>
+        <p class="subtitle">统计 Codex 的本地用量；有 CC Switch 时读取代理请求日志，没有时读取 Codex 原生 session 日志。</p>
       </div>
       <div class="stamp">
         <span class="label">统计窗口</span>
@@ -545,7 +673,7 @@ def render_dashboard(data: dict, period: str, start_label: str, end_label: str) 
       </div>
     </header>
     <div class="toolbar">
-      <span class="pill">数据源：CC Switch 本地 SQLite</span>
+      <span class="pill">数据源：{html.escape(source_label)}</span>
       <span class="pill">范围：仅 Codex</span>
       <span class="pill">周期：{html.escape(zh_period(period))}</span>
       <span class="pill">费用：估算</span>
@@ -659,10 +787,11 @@ def render_dashboard(data: dict, period: str, start_label: str, end_label: str) 
       metric('Token 总量', mtok(total.total_tokens), `${{fmt.format(total.requests)}} 条 Codex 记录`),
       metric('输入', mtok(total.input_tokens), `其中 ${{mtok(total.cache_read_tokens)}} 是缓存输入，占输入 ${{pct(total.cache_ratio)}}`),
       metric('输出', mtok(total.output_tokens), `占总 token ${{pct(total.output_ratio)}}`),
-      metric('估算费用', cost(total.estimated_cost_usd), `CC Switch 已记录费用 ${{cost(total.logged_cost_usd)}}`),
+      metric('估算费用', cost(total.estimated_cost_usd), data.cost_note || `本地记录费用 ${{cost(total.logged_cost_usd)}}`),
       dailyChart(),
       composition(),
       modelBars(),
+      data.source_note ? `<article class="card full"><p class="note">${{data.source_note}}</p></article>` : '',
       unknownNote,
       modelTable(),
       dayTable(),
@@ -682,14 +811,35 @@ def write_dashboard(data: dict, period: str, start_label: str, end_label: str, o
 
 def build_data(args: argparse.Namespace) -> tuple[dict, str, str]:
     start_ts, end_ts, start_label, end_label = period_bounds(args)
-    conn = connect(Path(args.db).expanduser())
-    prices = load_prices(conn)
     unknown_as = None if args.unknown_as == "none" else args.unknown_as
-    rows = fetch_rows(conn, start_ts, end_ts)
+    db_path = Path(args.db).expanduser()
+    source = args.source
+
+    if source == "auto":
+        source = "cc-switch" if db_path.exists() else "codex"
+
+    if source == "cc-switch":
+        conn = connect(db_path)
+        prices = load_prices(conn)
+        rows = fetch_rows(conn, start_ts, end_ts)
+        source_note = "数据来自 CC Switch 的本地 SQLite 请求日志，适合统计不同供应商切换后的 Codex 总用量。"
+        cost_note = f"CC Switch 已记录费用 {fmt_money(sum((dec(row_value(row, 'logged_cost_usd')) for row in rows), Decimal('0')))}"
+    elif source == "codex":
+        prices = default_prices()
+        rows = fetch_ccusage_rows(args, start_ts, end_ts)
+        source_note = "数据来自 Codex 本地 session 日志，并由 @ccusage/codex 解析 token_count 事件；它不依赖 CC Switch，但不能区分具体供应商账单。"
+        cost_note = "由 @ccusage/codex 基于本地 token 日志和模型价格估算"
+    else:
+        raise SystemExit(f"Unknown data source '{source}'")
+
     data = summarize(rows, prices, unknown_as)
     data["period"] = args.period
     data["start"] = start_label
     data["end"] = end_label
+    data["source"] = source
+    data["source_label"] = SOURCE_LABELS[source]
+    data["source_note"] = source_note
+    data["cost_note"] = cost_note
     return data, start_label, end_label
 
 
@@ -704,20 +854,26 @@ def main(argv: list[str] | None = None) -> int:
             rest = rest[1:]
         argv = [dashboard_period, "--dashboard", *rest]
 
-    parser = argparse.ArgumentParser(description="Summarize Codex token and cost usage from CC Switch logs.")
+    parser = argparse.ArgumentParser(description="Open a local Codex token and cost dashboard.")
     parser.add_argument("period", nargs="?", default="month", choices=["today", "yesterday", "week", "last7", "last14", "month", "30d", "last90", "quarter", "year", "all"])
     parser.add_argument("--since", help="Start date, YYYY-MM-DD. Overrides period.")
     parser.add_argument("--until", help="End date, YYYY-MM-DD inclusive. Overrides period.")
+    parser.add_argument("--source", choices=["auto", "cc-switch", "codex"], default="auto", help="Data source. Default: auto, using CC Switch when available, otherwise Codex session logs via @ccusage/codex.")
     parser.add_argument("--db", default=str(DEFAULT_DB), help=f"CC Switch sqlite db path. Default: {DEFAULT_DB}")
+    parser.add_argument("--codex-home", default=str(DEFAULT_CODEX_HOME), help=f"Codex home path. Default: {DEFAULT_CODEX_HOME}")
+    parser.add_argument("--ccusage-bin", default=os.environ.get("CCUSAGE_CODEX_BIN"), help="Path to an installed ccusage-codex executable. Default: search PATH, then fall back to npx.")
+    parser.add_argument("--timezone", default=os.environ.get("TZ"), help="IANA timezone passed to @ccusage/codex for Codex session logs.")
+    parser.add_argument("--ccusage-offline", action="store_true", help="Ask @ccusage/codex to use cached pricing data.")
     parser.add_argument("--daily", action="store_true", help="Show daily rows instead of model summary.")
     parser.add_argument("--json", action="store_true", help="Print JSON.")
     parser.add_argument("--dashboard", action="store_true", help="Generate and open the HTML dashboard.")
+    parser.add_argument("--summary", action="store_true", help="Print a terminal summary instead of opening the dashboard.")
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT), help=f"Dashboard output path. Default: {DEFAULT_OUTPUT}")
     parser.add_argument("--no-open", action="store_true", help="Generate dashboard without opening a browser.")
     parser.add_argument("--unknown-as", default="gpt-5.5", help="Estimate rows whose model is unknown as this model. Use 'none' to leave them unpriced. Default: gpt-5.5")
     args = parser.parse_args(argv)
 
-    dashboard_requested = args.dashboard
+    dashboard_requested = args.dashboard or not args.summary and not args.json and not args.daily
 
     data, start_label, end_label = build_data(args)
     if dashboard_requested:
