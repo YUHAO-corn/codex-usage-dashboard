@@ -214,7 +214,7 @@ def ccusage_base_command(args: argparse.Namespace) -> list[str]:
 
 
 def ccusage_command(args: argparse.Namespace, start_ts: int | None, end_ts: int | None) -> list[str]:
-    command = [*ccusage_base_command(args), "session", "--json", "--locale", "en-CA"]
+    command = [*ccusage_base_command(args), "daily", "--json", "--locale", "en-CA"]
     since = date_arg_from_ts(start_ts)
     until = date_arg_from_ts(end_ts, inclusive_end=True)
     if since:
@@ -255,20 +255,19 @@ def fetch_ccusage_rows(args: argparse.Namespace, start_ts: int | None, end_ts: i
         raise SystemExit(f"@ccusage/codex returned invalid JSON: {exc}") from exc
 
     rows: list[dict] = []
-    for session in payload.get("sessions", []):
-        activity = parse_timestamp(session.get("lastActivity"))
-        if not activity:
+    for day_item in payload.get("daily", []):
+        day = parse_ccusage_day(day_item.get("date"))
+        if not day:
             continue
-        day = activity.strftime("%Y-%m-%d")
-        session_cost = dec(session.get("costUSD"))
-        session_tokens = dec(session.get("totalTokens"))
-        models = session.get("models") if isinstance(session.get("models"), dict) else {}
+        day_cost = dec(day_item.get("costUSD"))
+        day_tokens = dec(day_item.get("totalTokens"))
+        models = day_item.get("models") if isinstance(day_item.get("models"), dict) else {}
         if not models:
-            models = {"unknown": session}
+            models = {"unknown": day_item}
 
         for model, stats in models.items():
             model_tokens = dec(stats.get("totalTokens"))
-            cost_share = Decimal("1") if session_tokens <= 0 else model_tokens / session_tokens
+            cost_share = Decimal("1") if day_tokens <= 0 else model_tokens / day_tokens
             rows.append(
                 {
                     "day": day,
@@ -280,10 +279,21 @@ def fetch_ccusage_rows(args: argparse.Namespace, start_ts: int | None, end_ts: i
                     "cache_read_tokens": int(stats.get("cachedInputTokens") or 0),
                     "cache_creation_tokens": 0,
                     "logged_cost_usd": 0,
-                    "estimated_cost_usd": session_cost * cost_share,
+                    "estimated_cost_usd": day_cost * cost_share,
                 }
             )
     return rows
+
+
+def parse_ccusage_day(value: str | None) -> str | None:
+    if not value:
+        return None
+    for fmt in ("%Y-%m-%d", "%b %d, %Y", "%B %d, %Y"):
+        try:
+            return dt.datetime.strptime(value, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return None
 
 
 def row_value(row: sqlite3.Row | dict, key: str, default=0):
