@@ -674,7 +674,7 @@ def render_dashboard(data: dict, period: str, start_label: str, end_label: str) 
     <header>
       <div>
         <h1>Codex 用量账本</h1>
-        <p class="subtitle">统计 Codex 的本地用量；有 CC Switch 时读取代理请求日志，没有时读取 Codex 原生 session 日志。</p>
+        <p class="subtitle">统计 Codex 的本地用量；默认优先读取 Codex 原生 session 日志，也可切到 CC Switch 代理请求日志。</p>
       </div>
       <div class="stamp">
         <span class="label">统计窗口</span>
@@ -823,26 +823,44 @@ def build_data(args: argparse.Namespace) -> tuple[dict, str, str]:
     start_ts, end_ts, start_label, end_label = period_bounds(args)
     unknown_as = None if args.unknown_as == "none" else args.unknown_as
     db_path = Path(args.db).expanduser()
+    sessions_dir = Path(args.codex_home).expanduser() / "sessions"
     source = args.source
+    auto_fallback_reason = None
 
-    if source == "auto":
+    if source == "auto" and sessions_dir.exists():
+        source = "codex"
+    elif source == "auto":
         source = "cc-switch" if db_path.exists() else "codex"
 
     if source == "cc-switch":
         conn = connect(db_path)
         prices = load_prices(conn)
         rows = fetch_rows(conn, start_ts, end_ts)
-        source_note = "数据来自 CC Switch 的本地 SQLite 请求日志，适合统计不同供应商切换后的 Codex 总用量。"
+        source_note = "数据来自 CC Switch 的本地 SQLite 请求日志，适合统计代理链路里的请求和供应商切换记录。"
         cost_note = f"CC Switch 已记录费用 {fmt_money(sum((dec(row_value(row, 'logged_cost_usd')) for row in rows), Decimal('0')))}"
         record_label = "CC Switch 请求记录"
     elif source == "codex":
         prices = default_prices()
-        rows = fetch_ccusage_rows(args, start_ts, end_ts)
-        source_note = "数据来自 Codex 本地 session 日志，并由 @ccusage/codex 解析 token_count 事件；它不依赖 CC Switch，但不能区分具体供应商账单。"
+        try:
+            rows = fetch_ccusage_rows(args, start_ts, end_ts)
+        except SystemExit as exc:
+            if args.source != "auto" or not db_path.exists():
+                raise
+            source = "cc-switch"
+            auto_fallback_reason = str(exc)
+            conn = connect(db_path)
+            prices = load_prices(conn)
+            rows = fetch_rows(conn, start_ts, end_ts)
+        source_note = "数据来自 Codex 本地 session 日志，并由 @ccusage/codex 解析 token_count 事件；它更适合统计 Codex 总 token，但不能区分具体供应商账单。"
         cost_note = "由 @ccusage/codex 基于本地 token 日志和模型价格估算"
         record_label = "日/模型统计点"
     else:
         raise SystemExit(f"Unknown data source '{source}'")
+
+    if auto_fallback_reason:
+        source_note = "自动模式优先尝试 Codex session 日志，但解析失败；已退回 CC Switch 本地 SQLite。失败原因：" + auto_fallback_reason.splitlines()[0]
+        cost_note = f"CC Switch 已记录费用 {fmt_money(sum((dec(row_value(row, 'logged_cost_usd')) for row in rows), Decimal('0')))}"
+        record_label = "CC Switch 请求记录"
 
     data = summarize(rows, prices, unknown_as)
     data["period"] = args.period
@@ -871,7 +889,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("period", nargs="?", default="month", choices=["today", "yesterday", "week", "last7", "last14", "month", "30d", "last90", "quarter", "year", "all"])
     parser.add_argument("--since", help="Start date, YYYY-MM-DD. Overrides period.")
     parser.add_argument("--until", help="End date, YYYY-MM-DD inclusive. Overrides period.")
-    parser.add_argument("--source", choices=["auto", "cc-switch", "codex"], default="auto", help="Data source. Default: auto, using CC Switch when available, otherwise Codex session logs via @ccusage/codex.")
+    parser.add_argument("--source", choices=["auto", "cc-switch", "codex"], default="auto", help="Data source. Default: auto, preferring Codex session logs via @ccusage/codex and falling back to CC Switch when needed.")
     parser.add_argument("--db", default=str(DEFAULT_DB), help=f"CC Switch sqlite db path. Default: {DEFAULT_DB}")
     parser.add_argument("--codex-home", default=str(DEFAULT_CODEX_HOME), help=f"Codex home path. Default: {DEFAULT_CODEX_HOME}")
     parser.add_argument("--ccusage-bin", default=os.environ.get("CCUSAGE_CODEX_BIN"), help="Path to an installed ccusage-codex executable. Default: search PATH, then fall back to npx.")

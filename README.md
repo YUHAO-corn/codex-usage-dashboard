@@ -2,7 +2,7 @@
 
 一个本地 Codex 用量仪表盘。运行 `codex-usage`，它会生成并打开中文 HTML 报告，统计 input / output / cached input token、模型分布、每日趋势和估算费用。
 
-它优先读取 CC Switch 的本地请求日志；如果用户没有 CC Switch，会退到 Codex 自己的 session 日志，并复用 [`@ccusage/codex`](https://www.npmjs.com/package/@ccusage/codex) 做 token 统计。
+它默认优先读取 Codex 自己的 session 日志，并复用 [`@ccusage/codex`](https://www.npmjs.com/package/@ccusage/codex) 做 token 统计；需要代理链路或供应商切换口径时，也可以切到 CC Switch 的本地请求日志。
 
 ![status](https://img.shields.io/badge/status-local%20first-1c7c54)
 ![python](https://img.shields.io/badge/python-3.10%2B-2457a6)
@@ -42,10 +42,11 @@ python3 bin/codex-usage
 
 默认 `--source auto`：
 
-- 如果存在 `~/.cc-switch/cc-switch.db`，使用 CC Switch 本地 SQLite。这个口径最细，可以覆盖你通过 CC Switch 切换过的供应商。
-- 如果没有 CC Switch，使用 `~/.codex/sessions/**/rollout-*.jsonl`。这个口径来自 Codex 本地真实日志，不是 mock 数据。
+- 如果存在 `~/.codex/sessions/**/rollout-*.jsonl`，优先使用 Codex 本地真实日志。这个口径更适合统计 Codex 总 token，不是 mock 数据。
+- 如果 Codex session 解析器不可用，但存在 `~/.cc-switch/cc-switch.db`，自动退回 CC Switch 本地 SQLite。
+- 如果你想强制看代理链路口径，可以运行 `codex-usage --source cc-switch`。
 
-没有 CC Switch 时，本工具会调用 `ccusage-codex`。建议先安装一次：
+Codex session 口径需要 `ccusage-codex`。建议先安装一次：
 
 ```bash
 npm install -g @ccusage/codex
@@ -59,18 +60,18 @@ codex-usage
 如果你是 Codex、Claude Code 或其它本地 AI coding agent，用户给你这个仓库链接后，请按下面步骤处理：
 
 1. 检查 Python 版本：`python3 --version`，需要 Python 3.10+。
-2. 检查 CC Switch 数据库：`~/.cc-switch/cc-switch.db`。
-3. 如果有 CC Switch，安装本项目后直接运行 `codex-usage`。
-4. 如果没有 CC Switch，检查 Codex session 目录：`~/.codex/sessions`。
-5. 没有 CC Switch 但有 Codex session 时，先确认 Node.js/npm 可用，再安装统计解析器：`npm install -g @ccusage/codex`。
-6. 安装本项目：`pipx install git+https://github.com/YUHAO-corn/codex-usage-dashboard.git`。
-7. 运行 `codex-usage`，确认浏览器打开 `~/codex-usage-dashboard.html`。
-8. 告诉用户以后常用命令：
+2. 检查 Codex session 目录：`~/.codex/sessions`。
+3. 如果 Codex sessions 存在，确认 Node.js/npm 可用，并安装统计解析器：`npm install -g @ccusage/codex`。
+4. 检查 CC Switch 数据库：`~/.cc-switch/cc-switch.db`，这是备用或代理账本口径。
+5. 安装本项目：`pipx install git+https://github.com/YUHAO-corn/codex-usage-dashboard.git`。
+6. 运行 `codex-usage`，确认浏览器打开 `~/codex-usage-dashboard.html`。
+7. 告诉用户以后常用命令：
 
 ```bash
 codex-usage                 # 打开本月仪表盘
 codex-usage week            # 本周仪表盘
 codex-usage 30d             # 近 30 天仪表盘
+codex-usage --source cc-switch # 强制使用 CC Switch 口径
 codex-usage --summary month # 终端摘要
 codex-usage month --json    # JSON 输出
 ```
@@ -150,9 +151,9 @@ codex-usage month --json
 
 费用是估算，不是供应商真实账单。
 
-CC Switch 数据源来自本地代理请求日志，适合统计“所有经过 CC Switch 的 Codex 请求”。
+Codex session 数据源来自 Codex 本地 JSONL 日志，适合统计真实 Codex token 总用量。它不会区分你背后到底用了哪个供应商，也不能替代供应商账单，但比 mock 数据或终端截屏可靠得多。
 
-Codex session 数据源来自 Codex 本地 JSONL 日志，适合在没有 CC Switch 时统计真实 token 用量。它不会区分你背后到底用了哪个供应商，也不能替代供应商账单，但比 mock 数据或终端截屏可靠得多。
+CC Switch 数据源来自本地代理请求日志，适合统计“经过 CC Switch 的 Codex 请求”和供应商切换链路。它不一定覆盖所有 Codex session。
 
 ## 数据和隐私
 
