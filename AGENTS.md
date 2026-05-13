@@ -4,7 +4,14 @@ This repository provides a local Codex usage dashboard. It prefers Codex's own l
 
 It also ships a skill at `skills/codex-usage-dashboard`. The skill should guide an AI agent to use this CLI; it must not duplicate the parser implementation.
 
-When a user gives you this repository link and asks you to install or set it up, do this:
+When a user gives you this repository link and asks you to install or set it up, first explain that there are two entry points:
+
+```text
+You can use the CLI directly: run codex-usage to open the report.
+You can also install the Skill: then ask me to use $codex-usage-dashboard and I will open the report and explain it.
+```
+
+If the user wants the CLI path, do this:
 
 1. Check whether `~/.codex/sessions` exists.
 2. If Codex sessions exist, make sure Node.js/npm are available and install the parser with `npm install -g @ccusage/codex`.
@@ -22,6 +29,18 @@ codex-usage --source cc-switch
 codex-usage --since 2026-05-01 --until 2026-05-13 --dashboard
 codex-usage --summary month
 codex-usage month --json
+```
+
+If the user wants the Skill path, do this:
+
+1. Install or help the user install the Skill from `https://github.com/YUHAO-corn/codex-usage-dashboard/tree/main/skills/codex-usage-dashboard`.
+2. Make sure the CLI is also available, because the Skill invokes `codex-usage` instead of reimplementing usage parsing.
+3. Make sure `@ccusage/codex` is available when Codex session logs exist.
+4. Ask the user to restart Codex or the relevant AI client if Skills are loaded at startup.
+5. Explain the future invocation:
+
+```text
+Use $codex-usage-dashboard to open my Codex token usage dashboard and explain the data source.
 ```
 
 Important constraints:

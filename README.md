@@ -19,7 +19,15 @@
 - 你可能用 CC Switch 切多个供应商，也可能完全不用 CC Switch。
 - 你想把一个开源链接丢给 AI agent，让它帮你装好并解释以后怎么用。
 
-## 快速使用
+## 你有两种用法
+
+这个项目同时支持命令行和 Skill。两种方式用的是同一套统计逻辑，区别只是入口不同。
+
+如果你愿意直接运行命令，安装后执行 `codex-usage` 就会打开本地用量网页。
+
+如果你更希望通过 AI agent 使用，可以安装仓库里的 Skill。以后你只要让 AI 使用 `$codex-usage-dashboard`，它就会帮你检查环境、运行统计，并解释报告。
+
+## 命令行用法
 
 推荐用 `pipx` 安装：
 
@@ -42,7 +50,7 @@ python3 bin/codex-usage
 ~/codex-usage-dashboard.html
 ```
 
-## 作为 Skill 使用
+## Skill 用法
 
 这个仓库也附带一个 Codex-compatible Skill：`skills/codex-usage-dashboard`。
 
@@ -51,6 +59,13 @@ Skill 不替代 CLI，也不复制一套统计逻辑。它的作用是让 AI age
 如果你的 AI 支持从 GitHub 安装 Skill，可以把这个路径交给它：
 
 ```text
+https://github.com/YUHAO-corn/codex-usage-dashboard/tree/main/skills/codex-usage-dashboard
+```
+
+你可以直接对 AI 说：
+
+```text
+请帮我安装这个 Codex Usage Dashboard Skill：
 https://github.com/YUHAO-corn/codex-usage-dashboard/tree/main/skills/codex-usage-dashboard
 ```
 
@@ -83,6 +98,15 @@ codex-usage
 
 如果你是 Codex、Claude Code 或其它本地 AI coding agent，用户给你这个仓库链接后，请按下面步骤处理：
 
+先用人话告诉用户有两种方式：
+
+```text
+你可以直接用命令行：以后运行 codex-usage 就会打开报告。
+你也可以把它装成 Skill：以后让我使用 $codex-usage-dashboard，我会帮你打开报告并解释数据。
+```
+
+如果用户选择命令行：
+
 1. 检查 Python 版本：`python3 --version`，需要 Python 3.10+。
 2. 检查 Codex session 目录：`~/.codex/sessions`。
 3. 如果 Codex sessions 存在，确认 Node.js/npm 可用，并安装统计解析器：`npm install -g @ccusage/codex`。
@@ -98,6 +122,18 @@ codex-usage 30d             # 近 30 天仪表盘
 codex-usage --source cc-switch # 强制使用 CC Switch 口径
 codex-usage --summary month # 终端摘要
 codex-usage month --json    # JSON 输出
+```
+
+如果用户选择 Skill：
+
+1. 安装 Skill 路径：`https://github.com/YUHAO-corn/codex-usage-dashboard/tree/main/skills/codex-usage-dashboard`。
+2. 同时确保 CLI 可用，因为 Skill 会调用 `codex-usage`，不会自己复制统计逻辑。
+3. 安装或确认 `@ccusage/codex` 可用，以便优先读取 Codex 本地 session。
+4. 让用户重启 Codex 或对应 AI 客户端，让它重新加载 Skills。
+5. 告诉用户以后这样调用：
+
+```text
+用 $codex-usage-dashboard 打开我的 Codex 用量报告，并解释数据源。
 ```
 
 如果用户机器上既没有 CC Switch，也没有 `~/.codex/sessions`，那就没有真实本地数据可统计。不要生成 mock 报告。

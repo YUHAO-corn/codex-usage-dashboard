@@ -13,6 +13,15 @@ Use the repository CLI as the single implementation. Do not reimplement log pars
 
 ## What To Do
 
+If the user is setting this up from the repository link, explain the two usage paths first:
+
+```text
+You can use the command directly: run codex-usage to open the report.
+You can use the Skill: ask me to use $codex-usage-dashboard and I will open the report and explain it.
+```
+
+If the user wants the Skill path, make sure the CLI is installed too. The Skill is the AI-facing entry point; the CLI is the implementation it runs.
+
 1. Locate or install the CLI.
    - If already inside this repository, run `python3 bin/codex-usage`.
    - Otherwise prefer `pipx install git+https://github.com/YUHAO-corn/codex-usage-dashboard.git`.
