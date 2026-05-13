@@ -82,11 +82,24 @@ def period_bounds(args: argparse.Namespace) -> tuple[int | None, int | None, str
     if args.period == "last7":
         start = local_now() - dt.timedelta(days=7)
         return int(start.timestamp()), None, "last 7 days", "now"
+    if args.period == "last14":
+        start = local_now() - dt.timedelta(days=14)
+        return int(start.timestamp()), None, "last 14 days", "now"
     if args.period == "month":
         return int(today.replace(day=1).timestamp()), None, "this month", "now"
     if args.period == "30d":
         start = local_now() - dt.timedelta(days=30)
         return int(start.timestamp()), None, "last 30 days", "now"
+    if args.period == "last90":
+        start = local_now() - dt.timedelta(days=90)
+        return int(start.timestamp()), None, "last 90 days", "now"
+    if args.period == "quarter":
+        quarter_month = ((today.month - 1) // 3) * 3 + 1
+        start = today.replace(month=quarter_month, day=1)
+        return int(start.timestamp()), None, "this quarter", "now"
+    if args.period == "year":
+        start = today.replace(month=1, day=1)
+        return int(start.timestamp()), None, "this year", "now"
     if args.period == "all":
         return None, None, "beginning", "now"
     raise SystemExit(f"Unknown period '{args.period}'")
@@ -276,8 +289,12 @@ def zh_period(value: str) -> str:
         "yesterday": "昨天",
         "week": "本周",
         "last7": "近 7 天",
+        "last14": "近 14 天",
         "month": "本月",
         "30d": "近 30 天",
+        "last90": "近 90 天",
+        "quarter": "本季度",
+        "year": "今年",
         "all": "全部",
     }.get(value, value)
 
@@ -288,8 +305,12 @@ def zh_window(value: str) -> str:
         "yesterday": "昨天",
         "this week": "本周",
         "last 7 days": "近 7 天",
+        "last 14 days": "近 14 天",
         "this month": "本月",
         "last 30 days": "近 30 天",
+        "last 90 days": "近 90 天",
+        "this quarter": "本季度",
+        "this year": "今年",
         "beginning": "开始",
         "now": "现在",
     }.get(value, value)
@@ -674,7 +695,7 @@ def build_data(args: argparse.Namespace) -> tuple[dict, str, str]:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    periods = {"today", "yesterday", "week", "last7", "month", "30d", "all"}
+    periods = {"today", "yesterday", "week", "last7", "last14", "month", "30d", "last90", "quarter", "year", "all"}
     if argv and argv[0] == "dashboard":
         dashboard_period = "month"
         rest = argv[1:]
@@ -684,7 +705,7 @@ def main(argv: list[str] | None = None) -> int:
         argv = [dashboard_period, "--dashboard", *rest]
 
     parser = argparse.ArgumentParser(description="Summarize Codex token and cost usage from CC Switch logs.")
-    parser.add_argument("period", nargs="?", default="month", choices=["today", "yesterday", "week", "last7", "month", "30d", "all"])
+    parser.add_argument("period", nargs="?", default="month", choices=["today", "yesterday", "week", "last7", "last14", "month", "30d", "last90", "quarter", "year", "all"])
     parser.add_argument("--since", help="Start date, YYYY-MM-DD. Overrides period.")
     parser.add_argument("--until", help="End date, YYYY-MM-DD inclusive. Overrides period.")
     parser.add_argument("--db", default=str(DEFAULT_DB), help=f"CC Switch sqlite db path. Default: {DEFAULT_DB}")
