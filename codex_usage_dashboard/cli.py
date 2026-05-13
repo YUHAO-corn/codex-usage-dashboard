@@ -23,6 +23,10 @@ SOURCE_LABELS = {
     "cc-switch": "CC Switch 本地 SQLite",
     "codex": "Codex 本地 session 日志",
 }
+SOURCE_LABELS_EN = {
+    "cc-switch": "CC Switch local SQLite",
+    "codex": "Codex local session logs",
+}
 
 # USD per 1M tokens. These fill gaps in older CC Switch pricing tables.
 DEFAULT_PRICES = {
@@ -435,6 +439,22 @@ def zh_period(value: str) -> str:
     }.get(value, value)
 
 
+def en_period(value: str) -> str:
+    return {
+        "today": "today",
+        "yesterday": "yesterday",
+        "week": "this week",
+        "last7": "last 7 days",
+        "last14": "last 14 days",
+        "month": "this month",
+        "30d": "last 30 days",
+        "last90": "last 90 days",
+        "quarter": "this quarter",
+        "year": "this year",
+        "all": "all time",
+    }.get(value, value)
+
+
 def zh_window(value: str) -> str:
     return {
         "today": "今天",
@@ -449,6 +469,23 @@ def zh_window(value: str) -> str:
         "this year": "今年",
         "beginning": "开始",
         "now": "现在",
+    }.get(value, value)
+
+
+def en_window(value: str) -> str:
+    return {
+        "today": "today",
+        "yesterday": "yesterday",
+        "this week": "this week",
+        "last 7 days": "last 7 days",
+        "last 14 days": "last 14 days",
+        "this month": "this month",
+        "last 30 days": "last 30 days",
+        "last 90 days": "last 90 days",
+        "this quarter": "this quarter",
+        "this year": "this year",
+        "beginning": "beginning",
+        "now": "now",
     }.get(value, value)
 
 
@@ -502,17 +539,26 @@ def print_daily(data: dict) -> None:
         )
 
 
-def render_dashboard(data: dict, period: str, start_label: str, end_label: str) -> str:
+def render_dashboard(data: dict, period: str, start_label: str, end_label: str, lang: str = "auto") -> str:
     payload = json.dumps(data, default=json_ready, ensure_ascii=False)
-    title = f"Codex 用量 · {html.escape(zh_window(start_label))}"
-    window_label = f"{zh_window(start_label)} → {zh_window(end_label)}"
-    source_label = data.get("source_label", "未知")
+    config = json.dumps(
+        {
+            "lang": lang,
+            "period": period,
+            "period_en": en_period(period),
+            "period_zh": zh_period(period),
+            "window_en": f"{en_window(start_label)} → {en_window(end_label)}",
+            "window_zh": f"{zh_window(start_label)} → {zh_window(end_label)}",
+            "generated_at": data["generated_at"],
+        },
+        ensure_ascii=False,
+    )
     return f"""<!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{title}</title>
+  <title>Codex Usage Dashboard</title>
   <style>
     :root {{
       --ink: #191713;
@@ -579,6 +625,38 @@ def render_dashboard(data: dict, period: str, start_label: str, end_label: str) 
       flex-wrap: wrap;
       gap: 10px;
       margin: 22px 0;
+    }}
+    .toolbar-row {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin: 22px 0;
+    }}
+    .toolbar-row .toolbar {{ margin: 0; }}
+    .lang-switch {{
+      display: inline-flex;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255,255,255,.46);
+      box-shadow: 0 8px 18px rgba(52,43,28,.08);
+      overflow: hidden;
+    }}
+    .lang-switch button {{
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      min-width: 48px;
+      padding: 9px 12px;
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+    }}
+    .lang-switch button.active {{
+      background: var(--ink);
+      color: var(--paper);
     }}
     .pill {{
       border: 1px solid var(--line);
@@ -665,6 +743,8 @@ def render_dashboard(data: dict, period: str, start_label: str, end_label: str) 
       .metric, .wide, .side {{ grid-column: 1 / -1; }}
       .chart {{ gap: 4px; }}
       th, td {{ font-size: 12px; padding: 8px 6px; }}
+      .bar-row {{ grid-template-columns: 86px 1fr; }}
+      .bar-row span:last-child {{ grid-column: 2; }}
     }}
   </style>
 </head>
@@ -673,52 +753,144 @@ def render_dashboard(data: dict, period: str, start_label: str, end_label: str) 
   <main>
     <header>
       <div>
-        <h1>Codex 用量账本</h1>
-        <p class="subtitle">统计 Codex 的本地用量；默认优先读取 Codex 原生 session 日志，也可切到 CC Switch 代理请求日志。</p>
+        <h1 id="page-title">Codex Usage Ledger</h1>
+        <p class="subtitle" id="page-subtitle"></p>
       </div>
       <div class="stamp">
-        <span class="label">统计窗口</span>
-        <strong>{html.escape(window_label)}</strong>
-        <span class="hint">生成时间 {html.escape(data["generated_at"])}</span>
+        <span class="label" id="window-label"></span>
+        <strong id="window-value"></strong>
+        <span class="hint" id="generated-label"></span>
       </div>
     </header>
-    <div class="toolbar">
-      <span class="pill">数据源：{html.escape(source_label)}</span>
-      <span class="pill">范围：仅 Codex</span>
-      <span class="pill">周期：{html.escape(zh_period(period))}</span>
-      <span class="pill">费用：估算</span>
+    <div class="toolbar-row">
+      <div class="toolbar" id="toolbar"></div>
+      <div class="lang-switch" aria-label="Language">
+        <button type="button" data-lang="en">EN</button>
+        <button type="button" data-lang="zh">中文</button>
+      </div>
     </div>
     <section class="grid" id="app"></section>
   </main>
   <script id="usage-data" type="application/json">{payload}</script>
+  <script id="dashboard-config" type="application/json">{config}</script>
   <script>
     const data = JSON.parse(document.getElementById('usage-data').textContent);
+    const config = JSON.parse(document.getElementById('dashboard-config').textContent);
     const app = document.getElementById('app');
     const total = data.total;
-    const fmt = new Intl.NumberFormat();
-    const money = new Intl.NumberFormat(undefined, {{ style: 'currency', currency: 'USD', maximumFractionDigits: 2 }});
-    const mtok = (n) => `${{(n / 1_000_000).toFixed(2)}}M`;
-    const pct = (n) => `${{(n * 100).toFixed(1)}}%`;
-    const cost = (n) => money.format(n || 0);
     const maxDaily = Math.max(...data.daily.map(d => d.total_tokens), 1);
     const maxModel = Math.max(...data.models.map(m => m.total_tokens), 1);
+    const ui = {{
+      en: {{
+        docTitle: 'Codex Usage Dashboard',
+        title: 'Codex Usage Ledger',
+        subtitle: 'Track local Codex usage. By default it prefers Codex native session logs, with CC Switch proxy request logs available when needed.',
+        window: 'Reporting window',
+        generated: 'Generated at',
+        dataSource: 'Data source',
+        scope: 'Scope: Codex only',
+        period: 'Period',
+        cost: 'Cost: estimated',
+        tokenTotal: 'Total tokens',
+        input: 'Input',
+        output: 'Output',
+        estimatedCost: 'Estimated cost',
+        points: 'records',
+        cachedIs: 'cached input',
+        cachedShare: 'of input',
+        outputShare: 'of total tokens',
+        localCost: 'Logged local cost',
+        composition: 'Token composition',
+        inputOfTotal: 'of total',
+        outputOfTotal: 'of total',
+        cachedInput: 'Cached input',
+        cachedNote: 'Cached input is part of input tokens. It is listed separately because it is usually priced lower.',
+        dailyTrend: 'Daily token trend',
+        totalInput: 'Total input',
+        cachedWithinInput: 'cached within input',
+        outputInTable: 'output shown in the table below',
+        modelDistribution: 'Model distribution',
+        modelDetail: 'Model details',
+        dailyDetail: 'Daily details',
+        model: 'Model',
+        records: 'Records / points',
+        total: 'Total',
+        date: 'Date',
+        unknownPrefix: 'Historical records contain',
+        unknownMiddle: 'tokens whose model is unknown. This dashboard estimates them as',
+        unknownNone: 'unpriced',
+        unknownSuffix: 'by default. To only count known model prices, run',
+      }},
+      zh: {{
+        docTitle: 'Codex 用量仪表盘',
+        title: 'Codex 用量账本',
+        subtitle: '统计 Codex 的本地用量；默认优先读取 Codex 原生 session 日志，也可切到 CC Switch 代理请求日志。',
+        window: '统计窗口',
+        generated: '生成时间',
+        dataSource: '数据源',
+        scope: '范围：仅 Codex',
+        period: '周期',
+        cost: '费用：估算',
+        tokenTotal: 'Token 总量',
+        input: '输入',
+        output: '输出',
+        estimatedCost: '估算费用',
+        points: '统计点',
+        cachedIs: '缓存输入',
+        cachedShare: '占输入',
+        outputShare: '占总 token',
+        localCost: '本地记录费用',
+        composition: 'Token 构成',
+        inputOfTotal: '总量',
+        outputOfTotal: '总量',
+        cachedInput: '缓存输入',
+        cachedNote: '缓存输入是输入 token 的一部分，单独列出是因为它通常按更低价格计费。',
+        dailyTrend: '每日 Token 趋势',
+        totalInput: '总输入',
+        cachedWithinInput: '其中缓存输入',
+        outputInTable: '输出见下方表格',
+        modelDistribution: '模型分布',
+        modelDetail: '模型明细',
+        dailyDetail: '每日明细',
+        model: '模型',
+        records: '记录/统计点',
+        total: '总量',
+        date: '日期',
+        unknownPrefix: '历史记录里有',
+        unknownMiddle: '个 token 的模型名是 unknown。本页面默认按',
+        unknownNone: '未计价',
+        unknownSuffix: '估算；如果要严格只看已知模型价格，可运行',
+      }},
+    }};
+
+    function browserLanguage() {{
+      const language = (navigator.language || navigator.userLanguage || '').toLowerCase();
+      return language.startsWith('zh') ? 'zh' : 'en';
+    }}
+
+    function initialLanguage() {{
+      if (config.lang === 'en' || config.lang === 'zh') return config.lang;
+      const stored = localStorage.getItem('codex-usage-lang');
+      if (stored === 'en' || stored === 'zh') return stored;
+      return browserLanguage();
+    }}
 
     function metric(label, value, hint) {{
       return `<article class="card metric"><div class="label">${{label}}</div><div class="value">${{value}}</div><div class="hint">${{hint}}</div></article>`;
     }}
 
-    function composition() {{
+    function composition(strings, mtok, pct) {{
       const inputShare = total.total_tokens ? total.input_tokens / total.total_tokens : 0;
       const outputShare = total.total_tokens ? total.output_tokens / total.total_tokens : 0;
       const cachedShare = total.input_tokens ? total.cache_read_tokens / total.input_tokens : 0;
       return `<article class="card side">
-        <div class="label">Token 构成</div>
+        <div class="label">${{strings.composition}}</div>
         <div class="bar-stack">
-          ${{bar('输入', inputShare, `${{mtok(total.input_tokens)}} · ${{pct(inputShare)}} 总量`, 'input')}}
-          ${{bar('输出', outputShare, `${{mtok(total.output_tokens)}} · ${{pct(outputShare)}} 总量`, 'output')}}
-          ${{bar('缓存输入', cachedShare, `${{mtok(total.cache_read_tokens)}} · ${{pct(cachedShare)}} 输入`, 'cached')}}
+          ${{bar(strings.input, inputShare, `${{mtok(total.input_tokens)}} · ${{pct(inputShare)}} ${{strings.inputOfTotal}}`, 'input')}}
+          ${{bar(strings.output, outputShare, `${{mtok(total.output_tokens)}} · ${{pct(outputShare)}} ${{strings.outputOfTotal}}`, 'output')}}
+          ${{bar(strings.cachedInput, cachedShare, `${{mtok(total.cache_read_tokens)}} · ${{pct(cachedShare)}} ${{strings.input}}`, 'cached')}}
         </div>
-        <p class="note">缓存输入是输入 token 的一部分，单独列出是因为它通常按更低价格计费。</p>
+        <p class="note">${{strings.cachedNote}}</p>
       </article>`;
     }}
 
@@ -726,10 +898,10 @@ def render_dashboard(data: dict, period: str, start_label: str, end_label: str) 
       return `<div class="bar-row"><span>${{name}}</span><div class="bar-track"><div class="bar-fill ${{cls}}" style="width:${{Math.max(ratio * 100, 1)}}%"></div></div><span>${{text}}</span></div>`;
     }}
 
-    function dailyChart() {{
+    function dailyChart(strings, fmt, cost) {{
       const days = data.daily.slice(-30);
       return `<article class="card wide">
-        <div class="label">每日 Token 趋势</div>
+        <div class="label">${{strings.dailyTrend}}</div>
         <div class="chart" style="--n:${{days.length}}">
           ${{days.map(d => {{
             const h = Math.max(2, d.total_tokens / maxDaily * 100);
@@ -741,27 +913,27 @@ def render_dashboard(data: dict, period: str, start_label: str, end_label: str) 
           }}).join('')}}
         </div>
         <div class="legend">
-          <span><i class="swatch input"></i>总输入</span>
-          <span><i class="swatch cached"></i>其中缓存输入</span>
-          <span><i class="swatch output"></i>输出见下方表格</span>
+          <span><i class="swatch input"></i>${{strings.totalInput}}</span>
+          <span><i class="swatch cached"></i>${{strings.cachedWithinInput}}</span>
+          <span><i class="swatch output"></i>${{strings.outputInTable}}</span>
         </div>
       </article>`;
     }}
 
-    function modelBars() {{
+    function modelBars(strings, mtok) {{
       return `<article class="card side">
-        <div class="label">模型分布</div>
+        <div class="label">${{strings.modelDistribution}}</div>
         <div class="bar-stack">
           ${{data.models.map(m => bar(m.model, m.total_tokens / maxModel, mtok(m.total_tokens), m.model === 'unknown' ? 'cost' : 'input')).join('')}}
         </div>
       </article>`;
     }}
 
-    function modelTable() {{
+    function modelTable(strings, fmt, mtok, cost) {{
       return `<article class="card full">
-        <div class="label">模型明细</div>
+        <div class="label">${{strings.modelDetail}}</div>
         <table>
-          <thead><tr><th>模型</th><th>记录/统计点</th><th>总量</th><th>输入</th><th>输出</th><th>缓存输入</th><th>估算费用</th></tr></thead>
+          <thead><tr><th>${{strings.model}}</th><th>${{strings.records}}</th><th>${{strings.total}}</th><th>${{strings.input}}</th><th>${{strings.output}}</th><th>${{strings.cachedInput}}</th><th>${{strings.estimatedCost}}</th></tr></thead>
           <tbody>
             ${{data.models.map(m => `<tr>
               <td>${{m.model}}</td><td>${{fmt.format(m.requests)}}</td><td>${{mtok(m.total_tokens)}}</td>
@@ -773,11 +945,11 @@ def render_dashboard(data: dict, period: str, start_label: str, end_label: str) 
       </article>`;
     }}
 
-    function dayTable() {{
+    function dayTable(strings, fmt, mtok, cost) {{
       return `<article class="card full">
-        <div class="label">每日明细</div>
+        <div class="label">${{strings.dailyDetail}}</div>
         <table>
-          <thead><tr><th>日期</th><th>记录/统计点</th><th>总量</th><th>输入</th><th>输出</th><th>缓存输入</th><th>估算费用</th></tr></thead>
+          <thead><tr><th>${{strings.date}}</th><th>${{strings.records}}</th><th>${{strings.total}}</th><th>${{strings.input}}</th><th>${{strings.output}}</th><th>${{strings.cachedInput}}</th><th>${{strings.estimatedCost}}</th></tr></thead>
           <tbody>
             ${{data.daily.slice().reverse().map(d => `<tr>
               <td>${{d.day}}</td><td>${{fmt.format(d.requests)}}</td><td>${{mtok(d.total_tokens)}}</td>
@@ -789,31 +961,78 @@ def render_dashboard(data: dict, period: str, start_label: str, end_label: str) 
       </article>`;
     }}
 
-    const unknownNote = data.unknown_tokens
-      ? `<article class="card full"><p class="note">历史记录里有 ${{fmt.format(data.unknown_tokens)}} 个 token 的模型名是 unknown。本页面默认按 ${{data.unknown_as || '未计价'}} 估算；如果要严格只看已知模型价格，可运行 <code>codex-usage dashboard --unknown-as none</code>。</p></article>`
-      : '';
+    function localizedValue(name, lang) {{
+      return data[`${{name}}_${{lang}}`] || data[name] || '';
+    }}
 
-    app.innerHTML = [
-      metric('Token 总量', mtok(total.total_tokens), `${{fmt.format(total.requests)}} 个${{data.record_label || '统计点'}}`),
-      metric('输入', mtok(total.input_tokens), `其中 ${{mtok(total.cache_read_tokens)}} 是缓存输入，占输入 ${{pct(total.cache_ratio)}}`),
-      metric('输出', mtok(total.output_tokens), `占总 token ${{pct(total.output_ratio)}}`),
-      metric('估算费用', cost(total.estimated_cost_usd), data.cost_note || `本地记录费用 ${{cost(total.logged_cost_usd)}}`),
-      dailyChart(),
-      composition(),
-      modelBars(),
-      data.source_note ? `<article class="card full"><p class="note">${{data.source_note}}</p></article>` : '',
-      unknownNote,
-      modelTable(),
-      dayTable(),
-    ].join('');
+    function render(lang) {{
+      const strings = ui[lang];
+      const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+      const fmt = new Intl.NumberFormat(locale);
+      const money = new Intl.NumberFormat(locale, {{ style: 'currency', currency: 'USD', maximumFractionDigits: 2 }});
+      const mtok = (n) => `${{(n / 1_000_000).toFixed(2)}}M`;
+      const pct = (n) => `${{(n * 100).toFixed(1)}}%`;
+      const cost = (n) => money.format(n || 0);
+      const recordLabel = localizedValue('record_label', lang) || strings.points;
+      const sourceLabel = localizedValue('source_label', lang) || 'unknown';
+      const sourceNote = localizedValue('source_note', lang);
+      const costNote = localizedValue('cost_note', lang);
+      const windowLabel = lang === 'zh' ? config.window_zh : config.window_en;
+      const periodLabel = lang === 'zh' ? config.period_zh : config.period_en;
+      document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+      document.title = strings.docTitle;
+      document.getElementById('page-title').textContent = strings.title;
+      document.getElementById('page-subtitle').textContent = strings.subtitle;
+      document.getElementById('window-label').textContent = strings.window;
+      document.getElementById('window-value').textContent = windowLabel;
+      document.getElementById('generated-label').textContent = `${{strings.generated}} ${{config.generated_at}}`;
+      document.getElementById('toolbar').innerHTML = [
+        `<span class="pill">${{strings.dataSource}}: ${{sourceLabel}}</span>`,
+        `<span class="pill">${{strings.scope}}</span>`,
+        `<span class="pill">${{strings.period}}: ${{periodLabel}}</span>`,
+        `<span class="pill">${{strings.cost}}</span>`,
+      ].join('');
+      document.querySelectorAll('[data-lang]').forEach(button => {{
+        button.classList.toggle('active', button.dataset.lang === lang);
+        button.setAttribute('aria-pressed', button.dataset.lang === lang ? 'true' : 'false');
+      }});
+
+      const unknownNote = data.unknown_tokens
+        ? `<article class="card full"><p class="note">${{strings.unknownPrefix}} ${{fmt.format(data.unknown_tokens)}} ${{strings.unknownMiddle}} ${{data.unknown_as || strings.unknownNone}} ${{strings.unknownSuffix}} <code>codex-usage dashboard --unknown-as none</code>.</p></article>`
+        : '';
+
+      app.innerHTML = [
+        metric(strings.tokenTotal, mtok(total.total_tokens), `${{fmt.format(total.requests)}} ${{recordLabel}}`),
+        metric(strings.input, mtok(total.input_tokens), `${{mtok(total.cache_read_tokens)}} ${{strings.cachedIs}} · ${{strings.cachedShare}} ${{pct(total.cache_ratio)}}`),
+        metric(strings.output, mtok(total.output_tokens), `${{strings.outputShare}} ${{pct(total.output_ratio)}}`),
+        metric(strings.estimatedCost, cost(total.estimated_cost_usd), costNote || `${{strings.localCost}} ${{cost(total.logged_cost_usd)}}`),
+        dailyChart(strings, fmt, cost),
+        composition(strings, mtok, pct),
+        modelBars(strings, mtok),
+        sourceNote ? `<article class="card full"><p class="note">${{sourceNote}}</p></article>` : '',
+        unknownNote,
+        modelTable(strings, fmt, mtok, cost),
+        dayTable(strings, fmt, mtok, cost),
+      ].join('');
+    }}
+
+    let currentLanguage = initialLanguage();
+    render(currentLanguage);
+    document.querySelectorAll('[data-lang]').forEach(button => {{
+      button.addEventListener('click', () => {{
+        currentLanguage = button.dataset.lang;
+        localStorage.setItem('codex-usage-lang', currentLanguage);
+        render(currentLanguage);
+      }});
+    }});
   </script>
 </body>
 </html>"""
 
 
-def write_dashboard(data: dict, period: str, start_label: str, end_label: str, output: Path, should_open: bool) -> Path:
+def write_dashboard(data: dict, period: str, start_label: str, end_label: str, output: Path, should_open: bool, lang: str = "auto") -> Path:
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(render_dashboard(data, period, start_label, end_label), encoding="utf-8")
+    output.write_text(render_dashboard(data, period, start_label, end_label, lang), encoding="utf-8")
     if should_open:
         webbrowser.open(output.resolve().as_uri())
     return output
@@ -837,8 +1056,11 @@ def build_data(args: argparse.Namespace) -> tuple[dict, str, str]:
         prices = load_prices(conn)
         rows = fetch_rows(conn, start_ts, end_ts)
         source_note = "数据来自 CC Switch 的本地 SQLite 请求日志，适合统计代理链路里的请求和供应商切换记录。"
+        source_note_en = "Data comes from the local CC Switch SQLite request log. This is useful for proxy-chain requests and provider-switching records."
         cost_note = f"CC Switch 已记录费用 {fmt_money(sum((dec(row_value(row, 'logged_cost_usd')) for row in rows), Decimal('0')))}"
+        cost_note_en = f"CC Switch logged cost {fmt_money(sum((dec(row_value(row, 'logged_cost_usd')) for row in rows), Decimal('0')))}"
         record_label = "CC Switch 请求记录"
+        record_label_en = "CC Switch request records"
     elif source == "codex":
         prices = default_prices()
         try:
@@ -852,15 +1074,21 @@ def build_data(args: argparse.Namespace) -> tuple[dict, str, str]:
             prices = load_prices(conn)
             rows = fetch_rows(conn, start_ts, end_ts)
         source_note = "数据来自 Codex 本地 session 日志，并由 @ccusage/codex 解析 token_count 事件；它更适合统计 Codex 总 token，但不能区分具体供应商账单。"
+        source_note_en = "Data comes from local Codex session logs parsed by @ccusage/codex token_count events. This is better for total Codex token usage, but it cannot split provider-specific invoices."
         cost_note = "由 @ccusage/codex 基于本地 token 日志和模型价格估算"
+        cost_note_en = "Estimated by @ccusage/codex from local token logs and model prices"
         record_label = "日/模型统计点"
+        record_label_en = "daily/model points"
     else:
         raise SystemExit(f"Unknown data source '{source}'")
 
     if auto_fallback_reason:
         source_note = "自动模式优先尝试 Codex session 日志，但解析失败；已退回 CC Switch 本地 SQLite。失败原因：" + auto_fallback_reason.splitlines()[0]
+        source_note_en = "Auto mode tried Codex session logs first, but parsing failed. It fell back to CC Switch local SQLite. Reason: " + auto_fallback_reason.splitlines()[0]
         cost_note = f"CC Switch 已记录费用 {fmt_money(sum((dec(row_value(row, 'logged_cost_usd')) for row in rows), Decimal('0')))}"
+        cost_note_en = f"CC Switch logged cost {fmt_money(sum((dec(row_value(row, 'logged_cost_usd')) for row in rows), Decimal('0')))}"
         record_label = "CC Switch 请求记录"
+        record_label_en = "CC Switch request records"
 
     data = summarize(rows, prices, unknown_as)
     data["period"] = args.period
@@ -868,9 +1096,17 @@ def build_data(args: argparse.Namespace) -> tuple[dict, str, str]:
     data["end"] = end_label
     data["source"] = source
     data["source_label"] = SOURCE_LABELS[source]
+    data["source_label_zh"] = SOURCE_LABELS[source]
+    data["source_label_en"] = SOURCE_LABELS_EN[source]
     data["source_note"] = source_note
+    data["source_note_zh"] = source_note
+    data["source_note_en"] = source_note_en
     data["cost_note"] = cost_note
+    data["cost_note_zh"] = cost_note
+    data["cost_note_en"] = cost_note_en
     data["record_label"] = record_label
+    data["record_label_zh"] = record_label
+    data["record_label_en"] = record_label_en
     return data, start_label, end_label
 
 
@@ -901,6 +1137,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--summary", action="store_true", help="Print a terminal summary instead of opening the dashboard.")
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT), help=f"Dashboard output path. Default: {DEFAULT_OUTPUT}")
     parser.add_argument("--no-open", action="store_true", help="Generate dashboard without opening a browser.")
+    parser.add_argument("--lang", choices=["auto", "en", "zh"], default="auto", help="Dashboard language. Default: auto, following the browser/system language.")
     parser.add_argument("--unknown-as", default="gpt-5.5", help="Estimate rows whose model is unknown as this model. Use 'none' to leave them unpriced. Default: gpt-5.5")
     args = parser.parse_args(argv)
 
@@ -908,7 +1145,7 @@ def main(argv: list[str] | None = None) -> int:
 
     data, start_label, end_label = build_data(args)
     if dashboard_requested:
-        output = write_dashboard(data, args.period, start_label, end_label, Path(args.output).expanduser(), should_open=not args.no_open)
+        output = write_dashboard(data, args.period, start_label, end_label, Path(args.output).expanduser(), should_open=not args.no_open, lang=args.lang)
         print(f"Dashboard written to {output}")
         return 0
 
