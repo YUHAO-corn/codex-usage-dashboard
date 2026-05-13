@@ -470,7 +470,7 @@ def print_summary(data: dict, period: str, start_label: str, end_label: str) -> 
     total = data["total"]
     print(f"Codex usage: {period} ({start_label} -> {end_label})")
     print(f"Data source: {data.get('source_label', 'unknown')}")
-    print(f"Requests: {fmt_int(total['requests'])}")
+    print(f"Records: {fmt_int(total['requests'])} {data.get('record_label', 'records')}")
     print(f"Tokens: {fmt_int(total['total_tokens'])} total | {fmt_int(total['input_tokens'])} input | {fmt_int(total['output_tokens'])} output")
     print(f"Cached input: {fmt_int(total['cache_read_tokens'])} ({total['cache_ratio'] * 100:.1f}%)")
     print(f"Estimated cost: {fmt_money(total['estimated_cost_usd'])}")
@@ -761,7 +761,7 @@ def render_dashboard(data: dict, period: str, start_label: str, end_label: str) 
       return `<article class="card full">
         <div class="label">模型明细</div>
         <table>
-          <thead><tr><th>模型</th><th>记录数</th><th>总量</th><th>输入</th><th>输出</th><th>缓存输入</th><th>估算费用</th></tr></thead>
+          <thead><tr><th>模型</th><th>记录/统计点</th><th>总量</th><th>输入</th><th>输出</th><th>缓存输入</th><th>估算费用</th></tr></thead>
           <tbody>
             ${{data.models.map(m => `<tr>
               <td>${{m.model}}</td><td>${{fmt.format(m.requests)}}</td><td>${{mtok(m.total_tokens)}}</td>
@@ -777,7 +777,7 @@ def render_dashboard(data: dict, period: str, start_label: str, end_label: str) 
       return `<article class="card full">
         <div class="label">每日明细</div>
         <table>
-          <thead><tr><th>日期</th><th>记录数</th><th>总量</th><th>输入</th><th>输出</th><th>缓存输入</th><th>估算费用</th></tr></thead>
+          <thead><tr><th>日期</th><th>记录/统计点</th><th>总量</th><th>输入</th><th>输出</th><th>缓存输入</th><th>估算费用</th></tr></thead>
           <tbody>
             ${{data.daily.slice().reverse().map(d => `<tr>
               <td>${{d.day}}</td><td>${{fmt.format(d.requests)}}</td><td>${{mtok(d.total_tokens)}}</td>
@@ -794,7 +794,7 @@ def render_dashboard(data: dict, period: str, start_label: str, end_label: str) 
       : '';
 
     app.innerHTML = [
-      metric('Token 总量', mtok(total.total_tokens), `${{fmt.format(total.requests)}} 条 Codex 记录`),
+      metric('Token 总量', mtok(total.total_tokens), `${{fmt.format(total.requests)}} 个${{data.record_label || '统计点'}}`),
       metric('输入', mtok(total.input_tokens), `其中 ${{mtok(total.cache_read_tokens)}} 是缓存输入，占输入 ${{pct(total.cache_ratio)}}`),
       metric('输出', mtok(total.output_tokens), `占总 token ${{pct(total.output_ratio)}}`),
       metric('估算费用', cost(total.estimated_cost_usd), data.cost_note || `本地记录费用 ${{cost(total.logged_cost_usd)}}`),
@@ -834,11 +834,13 @@ def build_data(args: argparse.Namespace) -> tuple[dict, str, str]:
         rows = fetch_rows(conn, start_ts, end_ts)
         source_note = "数据来自 CC Switch 的本地 SQLite 请求日志，适合统计不同供应商切换后的 Codex 总用量。"
         cost_note = f"CC Switch 已记录费用 {fmt_money(sum((dec(row_value(row, 'logged_cost_usd')) for row in rows), Decimal('0')))}"
+        record_label = "CC Switch 请求记录"
     elif source == "codex":
         prices = default_prices()
         rows = fetch_ccusage_rows(args, start_ts, end_ts)
         source_note = "数据来自 Codex 本地 session 日志，并由 @ccusage/codex 解析 token_count 事件；它不依赖 CC Switch，但不能区分具体供应商账单。"
         cost_note = "由 @ccusage/codex 基于本地 token 日志和模型价格估算"
+        record_label = "日/模型统计点"
     else:
         raise SystemExit(f"Unknown data source '{source}'")
 
@@ -850,6 +852,7 @@ def build_data(args: argparse.Namespace) -> tuple[dict, str, str]:
     data["source_label"] = SOURCE_LABELS[source]
     data["source_note"] = source_note
     data["cost_note"] = cost_note
+    data["record_label"] = record_label
     return data, start_label, end_label
 
 
