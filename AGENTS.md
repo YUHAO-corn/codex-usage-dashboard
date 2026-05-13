@@ -2,6 +2,8 @@
 
 This repository provides a local Codex usage dashboard. It prefers Codex's own local session logs for total token usage, with CC Switch logs available as a proxy/provider-chain view.
 
+It also ships a skill at `skills/codex-usage-dashboard`. The skill should guide an AI agent to use this CLI; it must not duplicate the parser implementation.
+
 When a user gives you this repository link and asks you to install or set it up, do this:
 
 1. Check whether `~/.codex/sessions` exists.

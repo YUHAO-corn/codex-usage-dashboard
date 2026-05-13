@@ -42,6 +42,26 @@ python3 bin/codex-usage
 ~/codex-usage-dashboard.html
 ```
 
+## 作为 Skill 使用
+
+这个仓库也附带一个 Codex-compatible Skill：`skills/codex-usage-dashboard`。
+
+Skill 不替代 CLI，也不复制一套统计逻辑。它的作用是让 AI agent 知道该怎么帮用户检查环境、安装依赖、选择数据源、运行 `codex-usage`，并用中文解释报告。
+
+如果你的 AI 支持从 GitHub 安装 Skill，可以把这个路径交给它：
+
+```text
+https://github.com/YUHAO-corn/codex-usage-dashboard/tree/main/skills/codex-usage-dashboard
+```
+
+安装后重启 Codex 或对应 AI 客户端，让它重新加载 Skills。
+
+安装后可以这样说：
+
+```text
+用 $codex-usage-dashboard 打开我的 Codex 用量报告，并解释数据源。
+```
+
 ## 数据源
 
 默认 `--source auto`：

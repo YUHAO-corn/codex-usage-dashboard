@@ -1,0 +1,5 @@
+interface:
+  display_name: "Codex Usage Dashboard"
+  short_description: "Open a local Codex token and cost dashboard"
+  brand_color: "#1C7C54"
+  default_prompt: "Use $codex-usage-dashboard to open my Codex token usage dashboard and explain the data source."
